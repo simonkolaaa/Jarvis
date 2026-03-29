@@ -1,0 +1,215 @@
+# 🤖 Jarvis - Assistente AI Personale
+
+Un assistente AI ibrido (online/offline) con memoria personale basata su RAG.
+
+## Architettura
+
+```mermaid
+graph TD
+    A[main.py - CLI Loop] --> B[brain.py - AI Engine]
+    A --> C[memory.py - RAG System]
+    B --> D{MODE?}
+    D -->|offline| E[Ollama + Mistral]
+    D -->|online| F[Gemini API]
+    C --> G[Carica documenti da data/]
+    G --> H[Chunking + Embedding]
+    H --> I[ChromaDB - Vector Store]
+    I --> J[Retriever]
+    J --> B
+```
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Prerequisiti che devi avere installato PRIMA di procedere:**
+> 1. **Python 3.10+** installato sul tuo PC
+> 2. **Ollama** installato da [ollama.com](https://ollama.com) (per la modalità offline)
+> 3. Aver scaricato il modello Mistral via: `ollama pull mistral`
+> 4. Aver scaricato il modello di embedding via: `ollama pull nomic-embed-text`
+
+> [!WARNING]
+> **API Key Gemini (per modalità online):**
+> Per usare la modalità online ti serve una API key gratuita di Google Gemini.
+> Vai su [Google AI Studio](https://aistudio.google.com/) → crea una key → la metteremo nel file `.env`.
+> Se per ora vuoi usare solo la modalità offline, possiamo aggiungere Gemini dopo.
+
+> [!NOTE]
+> **Requisiti hardware per modalità offline:**
+> Mistral 7B richiede circa 4-5GB di RAM/VRAM. Se il tuo PC ha almeno 8GB di RAM dovrebbe funzionare, ma sarà più lento rispetto alla modalità online.
+
+## Proposed Changes
+
+### Struttura del Progetto
+
+```
+Jarvis/
+├── .env                    # API Keys (GOOGLE_API_KEY)
+├── .gitignore              # Ignora .env, venv, __pycache__, chroma_db
+├── requirements.txt        # Dipendenze Python
+├── main.py                 # Entry point - CLI interattivo
+├── config.py               # Configurazione centralizzata
+│
+├── core/
+│   ├── __init__.py
+│   ├── brain.py            # Motore AI (switch online/offline)
+│   └── memory.py           # Sistema RAG (ChromaDB + documenti)
+│
+├── data/                   # Cartella per i tuoi documenti personali
+│   └── benvenuto.txt       # File di esempio
+│
+└── chroma_db/              # Database vettoriale (creato automaticamente)
+```
+
+---
+
+### Dipendenze Python
+
+#### [NEW] [requirements.txt](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/requirements.txt)
+
+Pacchetti necessari:
+```
+langchain
+langchain-ollama
+langchain-chroma
+langchain-google-genai
+langchain-community
+chromadb
+python-dotenv
+pypdf
+```
+
+- `langchain-ollama` — integrazione moderna LangChain ↔ Ollama
+- `langchain-chroma` — integrazione moderna LangChain ↔ ChromaDB
+- `langchain-google-genai` — integrazione con Gemini (free tier)
+- `chromadb` — database vettoriale locale per RAG
+- `python-dotenv` — carica variabili da `.env`
+- `pypdf` — lettura file PDF
+
+---
+
+### Configurazione
+
+#### [NEW] [config.py](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/config.py)
+
+File di configurazione centralizzata con:
+- `MODE`: `"offline"` o `"online"` (default: `"offline"`)
+- `OFFLINE_MODEL`: `"mistral"` (modello Ollama)
+- `ONLINE_MODEL`: `"gemini-2.5-flash"` (modello Gemini gratuito)
+- `EMBEDDING_MODEL`: `"nomic-embed-text"` (per gli embeddings locali)
+- `DATA_DIR`: path alla cartella `data/`
+- `CHROMA_DIR`: path al database vettoriale
+- `CHUNK_SIZE` / `CHUNK_OVERLAP`: parametri per lo splitting dei documenti
+
+#### [NEW] [.env](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/.env)
+
+```env
+GOOGLE_API_KEY=la_tua_api_key_qui
+MODE=offline
+```
+
+#### [NEW] [.gitignore](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/.gitignore)
+
+Ignora: `.env`, `venv/`, `__pycache__/`, `chroma_db/`, `*.pyc`
+
+---
+
+### Core - Motore AI
+
+#### [NEW] [core/brain.py](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/core/brain.py)
+
+Il cervello di Jarvis. Implementa:
+
+1. **`get_llm(mode)`** — Restituisce il modello LLM corretto:
+   - Se `mode == "offline"` → `ChatOllama(model="mistral")`
+   - Se `mode == "online"` → `ChatGoogleGenerativeAI(model="gemini-2.5-flash")`
+
+2. **`ask_jarvis(question, context=None, mode="offline")`** — Funzione principale:
+   - Crea un `ChatPromptTemplate` con system prompt personalizzato ("Sei Jarvis, un assistente AI personale...")
+   - Se viene passato un `context` (dal RAG), lo include nel prompt
+   - Invoca il modello e restituisce la risposta come stringa
+   - Gestisce gli errori (Ollama non in esecuzione, API key mancante, ecc.)
+
+3. **`switch_mode(new_mode)`** — Cambia modalità al volo
+
+---
+
+### Core - Sistema RAG (Memoria)
+
+#### [NEW] [core/memory.py](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/core/memory.py)
+
+La memoria personale di Jarvis. Implementa:
+
+1. **`load_documents(data_dir)`** — Carica tutti i file dalla cartella `data/`:
+   - `.txt` → `TextLoader`
+   - `.pdf` → `PyPDFLoader`
+   - Restituisce una lista di `Document`
+
+2. **`split_documents(documents)`** — Divide i documenti in chunk:
+   - Usa `RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)`
+
+3. **`create_or_load_vectorstore(chunks=None)`** — Gestisce ChromaDB:
+   - Se `chunks` forniti → crea nuovo vectorstore con embeddings via `OllamaEmbeddings(model="nomic-embed-text")`
+   - Se esiste già `chroma_db/` → carica il vectorstore esistente
+   - Restituisce l'oggetto `Chroma`
+
+4. **`get_relevant_context(query, vectorstore)`** — Cerca nei tuoi documenti:
+   - Usa il retriever di ChromaDB per trovare i chunk più rilevanti
+   - Restituisce il contesto come stringa formattata
+
+5. **`ingest_documents()`** — Funzione "all-in-one":
+   - Chiama load → split → create_vectorstore in sequenza
+   - Da usare quando aggiungi nuovi file in `data/`
+
+---
+
+### Entry Point
+
+#### [NEW] [main.py](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/main.py)
+
+L'interfaccia CLI di Jarvis. Implementa:
+
+1. **Banner di avvio** con ASCII art "JARVIS"
+2. **Comandi speciali** riconosciuti nel loop:
+   - `/quit` o `/esci` — Esce dal programma
+   - `/mode online` o `/mode offline` — Cambia modalità
+   - `/mode` — Mostra la modalità corrente
+   - `/learn` — Re-ingesta i documenti dalla cartella `data/`
+   - `/help` — Mostra i comandi disponibili
+   - `/status` — Mostra stato (modalità, documenti caricati, ecc.)
+3. **Loop principale**:
+   - Legge input utente
+   - Cerca contesto rilevante via RAG (se il vectorstore esiste)
+   - Passa domanda + contesto a `ask_jarvis()`
+   - Stampa la risposta formattata con colori (usando codici ANSI)
+4. **Inizializzazione automatica**:
+   - All'avvio, se ci sono file in `data/`, li ingesta automaticamente
+   - Mostra la modalità corrente e un messaggio di benvenuto
+
+---
+
+### Dati di Esempio
+
+#### [NEW] [data/benvenuto.txt](file:///c:/Users/Utente/Desktop/Jarvis/Jarvis/data/benvenuto.txt)
+
+Un file di testo di esempio che Jarvis potrà leggere, contenente una breve presentazione del progetto per testare il RAG.
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> 1. **Hai già installato Ollama e scaricato Mistral?** Se no, devo guidarti prima in quei passaggi.
+> 2. **Hai una API key di Gemini?** Se no, vuoi partire solo con la modalità offline per ora?
+> 3. **Che tipo di documenti vuoi dare a Jarvis?** (solo .txt e .pdf per ora, o serve anche supporto per .docx, .md, ecc.?)
+
+## Verification Plan
+
+### Automated Tests
+1. **Test offline**: Avvio di Jarvis in modalità offline → invio di una domanda semplice → verifica che risponde
+2. **Test RAG**: Aggiunta di un file in `data/` → comando `/learn` → domanda sul contenuto del file → verifica che Jarvis usa il contesto
+3. **Test switch**: Comando `/mode online` → verifica cambio → `/mode offline` → verifica ritorno
+
+### Manual Verification
+- Verificare che `ollama serve` sia attivo prima di lanciare Jarvis
+- Testare con diversi tipi di domande (generali, specifiche sui documenti)
+- Verificare la gestione errori (Ollama spento, API key sbagliata)
