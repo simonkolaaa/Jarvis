@@ -12,6 +12,16 @@ build/
 
 # ChromaDB vector store
 chroma_db/
+databases/chroma_linda/  # NASCONDERE la RAM cruda di Linda
+# databases/chroma_jarvis/ (Questo va lasciato PUBBLICO per il deploy di Arus)
+
+# Dati Privati
+data/private/
+data/public/resume.pdf      # File sensibili (il vector store li ha già elaborati)
+data/public/simon_portfolio_config.txt
+
+# File ZIP di deployment
+deploy_arus.zip
 
 # IDE
 .vscode/

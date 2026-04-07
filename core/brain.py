@@ -1,8 +1,8 @@
 """
-Jarvis - Brain Module (Il Cervello)
-Gestisce la comunicazione con i modelli AI (Ollama offline / Gemini online).
+Jarvis-2 - Brain Module Unificato
+Gestisce la comunicazione con i modelli AI (Ollama offline / Gemini online) 
+per tutti gli Agenti: Jarvis, Linda e Arus.
 """
-import sys
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -14,15 +14,7 @@ def get_llm(mode: str = None):
     Restituisce l'istanza del modello LLM in base alla modalità.
     
     Args:
-        mode: "offline" per Ollama/Mistral, "online" per Gemini.
-              Se None, usa il valore da config.
-    
-    Returns:
-        Istanza del modello LLM.
-    
-    Raises:
-        ConnectionError: Se Ollama non è in esecuzione (offline).
-        ValueError: Se la API key è mancante (online).
+        mode: "offline" per Ollama, "online" per Gemini.
     """
     mode = mode or config.MODE
 
@@ -36,17 +28,13 @@ def get_llm(mode: str = None):
             return llm
         except Exception as e:
             raise ConnectionError(
-                f"\n❌ Errore connessione Ollama: {e}\n"
-                f"   Assicurati che Ollama sia in esecuzione (ollama serve)\n"
-                f"   e che il modello '{config.OFFLINE_MODEL}' sia scaricato (ollama pull {config.OFFLINE_MODEL})"
+                f"\n❌ Errore connessione Ollama (assicurati che sia in esecuzione): {e}\n"
             )
 
     elif mode == "online":
-        if not config.GOOGLE_API_KEY or config.GOOGLE_API_KEY == "inserisci_la_tua_api_key_qui":
+        if not config.GOOGLE_API_KEY or config.GOOGLE_API_KEY.startswith("inserisci"):
             raise ValueError(
-                "\n❌ API Key di Google mancante!\n"
-                "   Inserisci la tua GOOGLE_API_KEY nel file .env\n"
-                "   Ottieni una key gratuita su: https://aistudio.google.com/"
+                "\n❌ API Key di Google mancante! Inseriscila in .env o passa a modalità offline."
             )
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
@@ -58,89 +46,112 @@ def get_llm(mode: str = None):
             )
             return llm
         except Exception as e:
-            raise ConnectionError(
-                f"\n❌ Errore connessione Gemini: {e}\n"
-                f"   Controlla la tua API key e la connessione internet."
-            )
+            raise ConnectionError(f"\n❌ Errore connessione Gemini: {e}")
     else:
-        raise ValueError(f"Modalità '{mode}' non riconosciuta. Usa 'offline' o 'online'.")
+        raise ValueError(f"Modalità '{mode}' non riconosciuta.")
 
 
-def ask_jarvis(question: str, context: str = None, mode: str = None) -> str:
+def ask_ai(persona: str, question: str, context: str = None) -> str:
     """
-    Fa una domanda a Jarvis e restituisce la risposta.
+    Interroga il LLM impersonando lo specifico Agente.
     
     Args:
+        persona: "jarvis", "linda" o "arus"
         question: La domanda dell'utente.
-        context: Contesto opzionale dal sistema RAG (documenti personali).
-        mode: Modalità da usare ("offline" / "online"). Se None, usa config.
-    
-    Returns:
-        La risposta di Jarvis come stringa.
+        context: Contesto recuperato dal RAG.
     """
-    mode = mode or config.MODE
+    persona = persona.lower()
+    
+    # Deriva la modalità forzata in base alla persona
+    if persona == "linda":
+        mode = "offline"
+        system_prompt = config.LINDA_PROMPT
+    elif persona == "arus":
+        mode = "online"
+        system_prompt = config.ARUS_PROMPT
+    else:
+        mode = config.MODE
+        system_prompt = config.JARVIS_PROMPT
+
+    # Formattazione prompt col contesto (se c'è, sennò context="")
+    formatted_prompt = system_prompt.format(context=context if context else "Al momento non hai ricordi specifici.")
 
     try:
         llm = get_llm(mode)
-    except (ConnectionError, ValueError) as e:
+    except Exception as e:
         return str(e)
 
-    # Scegli il prompt in base alla presenza del contesto
-    if context:
-        system_prompt = config.SYSTEM_PROMPT_WITH_CONTEXT.format(context=context)
-    else:
-        system_prompt = config.SYSTEM_PROMPT
-
     prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
+        ("system", formatted_prompt),
         ("human", "{question}"),
     ])
 
-    # Crea la chain: prompt → LLM → output parser
     chain = prompt | llm | StrOutputParser()
 
     try:
-        response = chain.invoke({"question": question})
-        return response
+        return chain.invoke({"question": question})
     except Exception as e:
         error_msg = str(e)
-        if "Connection refused" in error_msg or "ConnectError" in error_msg:
-            return (
-                "\n❌ Impossibile connettersi a Ollama.\n"
-                "   Avvia Ollama con: ollama serve\n"
-                f"   Poi scarica il modello: ollama pull {config.OFFLINE_MODEL}"
-            )
-        elif "404" in error_msg or "not found" in error_msg.lower():
-            return (
-                f"\n❌ Modello non trovato.\n"
-                f"   Scaricalo con: ollama pull {config.OFFLINE_MODEL}"
-            )
-        elif "429" in error_msg or "quota" in error_msg.lower():
-            return (
-                "\n⚠️ Limite di richieste raggiunto per Gemini (free tier).\n"
-                "   Aspetta qualche minuto o passa alla modalità offline: /mode offline"
-            )
+        if "Connection refused" in error_msg:
+            return "❌ Impossibile connettersi ad Ollama. È in esecuzione?"
+        elif "429" in error_msg:
+            return "⚠️ Limite richieste Gemini raggiunto. Riprova più tardi."
         else:
-            return f"\n❌ Errore durante la risposta: {error_msg}"
+            return f"❌ Errore generico: {error_msg}"
+
+def stream_ai(persona: str, question: str, context: str = None):
+    """
+    Interroga il LLM restituendo un generatore per il text streaming.
+    """
+    persona = persona.lower()
+    
+    if persona == "linda":
+        mode = "offline"
+        system_prompt = config.LINDA_PROMPT
+    elif persona == "arus":
+        mode = "online"
+        system_prompt = config.ARUS_PROMPT
+    else:
+        mode = config.MODE
+        system_prompt = config.JARVIS_PROMPT
+
+    formatted_prompt = system_prompt.format(context=context if context else "Al momento non hai ricordi specifici.")
+
+    try:
+        llm = get_llm(mode)
+    except Exception as e:
+        yield str(e)
+        return
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", formatted_prompt),
+        ("human", "{question}"),
+    ])
+
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        for chunk in chain.stream({"question": question}):
+            yield chunk
+    except Exception as e:
+        error_msg = str(e)
+        if "Connection refused" in error_msg:
+            yield "❌ Impossibile connettersi ad Ollama."
+        elif "429" in error_msg:
+            yield "⚠️ Limite richieste Gemini raggiunto."
+        else:
+            yield f"❌ Errore generico: {error_msg}"
 
 
-def switch_mode(new_mode: str) -> str:
-    """
-    Cambia la modalità AI al volo.
-    
-    Args:
-        new_mode: "offline" o "online"
-    
-    Returns:
-        Messaggio di conferma.
-    """
+
+def switch_jarvis_mode(new_mode: str) -> str:
+    """Cambia la modalità al volo (Solo per Jarvis)."""
     new_mode = new_mode.lower().strip()
     if new_mode not in ("offline", "online"):
         return "⚠️ Modalità non valida. Usa 'offline' o 'online'."
 
     config.MODE = new_mode
-
     if new_mode == "offline":
-        return f"🔒 Modalità OFFLINE attivata → {config.OFFLINE_MODEL} (Ollama)"
+        return f"🔒 JARVIS OFFLINE attivata → {config.OFFLINE_MODEL} (Ollama)"
     else:
-        return f"🌐 Modalità ONLINE attivata → {config.ONLINE_MODEL} (Gemini)"
+        return f"🌐 JARVIS ONLINE attivata → {config.ONLINE_MODEL} (Gemini)"

@@ -1,9 +1,6 @@
 """
-Jarvis - Main Entry Point
+Jarvis - Main Entry Point (Legacy CLI)
 Interfaccia CLI interattiva per il tuo assistente AI personale.
-
-Utilizzo:
-    python main.py
 """
 import sys
 import os
@@ -12,9 +9,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
-from core.brain import ask_jarvis, switch_mode
-from core.memory import ingest_documents, get_relevant_context, create_or_load_vectorstore, get_document_stats
-
+from core.brain import ask_ai, switch_jarvis_mode
+from core.memory import rebuild_agent_memory, get_vectorstore, get_relevant_context
 
 # ─── Colori ANSI per il terminale ────────────────────────────────────
 class Colors:
@@ -22,7 +18,6 @@ class Colors:
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
     RED = "\033[91m"
-    MAGENTA = "\033[95m"
     BLUE = "\033[94m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -30,8 +25,7 @@ class Colors:
 
 
 def print_banner():
-    """Stampa il banner di avvio di Jarvis."""
-    banner = f"""
+    banner = fr"""
 {Colors.CYAN}{Colors.BOLD}
      ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗
      ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝
@@ -41,7 +35,7 @@ def print_banner():
  ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝
 {Colors.RESET}
 {Colors.DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.RESET}
-{Colors.GREEN}  🤖 Assistente AI Personale v1.0{Colors.RESET}
+{Colors.GREEN}  🤖 Assistente AI Personale v2.0 (Jarvis CLI){Colors.RESET}
 {Colors.DIM}  Digita /help per vedere i comandi disponibili{Colors.RESET}
 {Colors.DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.RESET}
 """
@@ -49,84 +43,43 @@ def print_banner():
 
 
 def print_help():
-    """Stampa la lista dei comandi disponibili."""
     help_text = f"""
 {Colors.CYAN}{Colors.BOLD}📋 Comandi Disponibili:{Colors.RESET}
-
   {Colors.YELLOW}/help{Colors.RESET}           → Mostra questo messaggio
   {Colors.YELLOW}/mode{Colors.RESET}           → Mostra la modalità corrente
   {Colors.YELLOW}/mode offline{Colors.RESET}   → Passa alla modalità offline (Ollama)
   {Colors.YELLOW}/mode online{Colors.RESET}    → Passa alla modalità online (Gemini)
-  {Colors.YELLOW}/learn{Colors.RESET}          → Ricarica i documenti dalla cartella data/
+  {Colors.YELLOW}/learn{Colors.RESET}          → Ricarica i documenti dalla cartella data/public/
   {Colors.YELLOW}/status{Colors.RESET}         → Mostra lo stato del sistema
   {Colors.YELLOW}/clear{Colors.RESET}          → Pulisce lo schermo
-  {Colors.YELLOW}/quit{Colors.RESET}           → Esci da Jarvis (anche /esci, /exit)
-
-{Colors.DIM}  Qualsiasi altro testo → Fai una domanda a Jarvis{Colors.RESET}
+  {Colors.YELLOW}/quit{Colors.RESET}           → Esci da Jarvis
 """
     print(help_text)
 
 
-def print_status(vectorstore):
-    """Stampa lo stato corrente del sistema."""
-    mode_icon = "🔒" if config.MODE == "offline" else "🌐"
-    mode_name = f"{config.OFFLINE_MODEL} (Ollama)" if config.MODE == "offline" else f"{config.ONLINE_MODEL} (Gemini)"
-    
-    stats = get_document_stats()
-    
-    has_memory = vectorstore is not None
-    memory_icon = "✅" if has_memory else "❌"
-    
-    status_text = f"""
-{Colors.CYAN}{Colors.BOLD}📊 Stato di Jarvis:{Colors.RESET}
-
-  {mode_icon} Modalità:      {Colors.BOLD}{config.MODE.upper()}{Colors.RESET} → {mode_name}
-  📁 Documenti:     {stats['total']} file ({stats['txt']} txt, {stats['pdf']} pdf, {stats['docx']} docx, {stats['md']} md)
-  {memory_icon} Memoria RAG:   {"Attiva" if has_memory else "Non inizializzata (usa /learn)"}
-  🧠 Embeddings:    {config.EMBEDDING_MODEL}
-  📂 Cartella dati: {config.DATA_DIR}
-"""
-    print(status_text)
-
-
 def main():
-    """Loop principale di Jarvis."""
-    # Abilita colori ANSI su Windows
     if sys.platform == "win32":
         os.system("color")
     
     print_banner()
     
-    # Mostra la modalità corrente
     mode_icon = "🔒" if config.MODE == "offline" else "🌐"
     mode_name = f"{config.OFFLINE_MODEL}" if config.MODE == "offline" else f"{config.ONLINE_MODEL}"
     print(f"  {mode_icon} Modalità: {Colors.BOLD}{config.MODE.upper()}{Colors.RESET} ({mode_name})")
     
-    # Inizializzazione: prova a caricare il vectorstore esistente
-    vectorstore = None
-    stats = get_document_stats()
+    # Prova a caricare il vectorstore esistente di Jarvis (solo dati public)
+    vectorstore = get_vectorstore(config.CHROMA_JARVIS_DIR)
     
-    if stats["total"] > 0:
-        print(f"  📁 Trovati {stats['total']} documento/i nella cartella data/")
-        print(f"  🔄 Caricamento memoria in corso...\n")
-        try:
-            # Prima prova a caricare un vectorstore esistente
-            vectorstore = create_or_load_vectorstore()
-            
-            # Se non esiste, crea uno nuovo
-            if vectorstore is None:
-                vectorstore = ingest_documents()
-        except Exception as e:
-            print(f"  ⚠️ Impossibile caricare la memoria: {e}")
-            print(f"  ℹ️ Jarvis funzionerà senza memoria RAG. Usa /learn per riprovare.\n")
+    if vectorstore:
+        print(f"  ✅ Memoria RAG Pubblica trovata (Usa /learn per aggiornarla se hai aggiunto file).")
     else:
-        print(f"  📭 Nessun documento in {config.DATA_DIR}")
-        print(f"  ℹ️ Aggiungi file .txt/.pdf/.docx/.md e usa /learn per attivarla\n")
-    
-    print(f"{Colors.DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.RESET}")
+        print(f"  📭 Nessuna memoria trovata. Provo a costruirla da config.DATA_PUBLIC_DIR...")
+        # Auto build al primo avvio se non c'è DB
+        if config.DATA_PUBLIC_DIR.exists() and any(config.DATA_PUBLIC_DIR.iterdir()):
+             vectorstore = rebuild_agent_memory("jarvis")
+
     print(f"\n{Colors.GREEN}  Jarvis è pronto. Come posso aiutarti?{Colors.RESET}\n")
     
-    # ─── Loop principale ─────────────────────────────────────────────
     while True:
         try:
             user_input = input(f"{Colors.BLUE}{Colors.BOLD}  Tu → {Colors.RESET}").strip()
@@ -137,72 +90,53 @@ def main():
         if not user_input:
             continue
         
-        # ─── Gestione comandi speciali ────────────────────────────────
         command = user_input.lower()
         
         if command in ("/quit", "/esci", "/exit", "/q"):
             print(f"\n{Colors.CYAN}  👋 Alla prossima! — Jarvis{Colors.RESET}\n")
             break
-        
         elif command == "/help":
             print_help()
             continue
-        
         elif command == "/mode":
             mode_icon = "🔒" if config.MODE == "offline" else "🌐"
-            mode_name = f"{config.OFFLINE_MODEL} (Ollama)" if config.MODE == "offline" else f"{config.ONLINE_MODEL} (Gemini)"
-            print(f"\n  {mode_icon} Modalità corrente: {Colors.BOLD}{config.MODE.upper()}{Colors.RESET} → {mode_name}\n")
+            print(f"\n  {mode_icon} Modalità: {Colors.BOLD}{config.MODE.upper()}{Colors.RESET}\n")
             continue
-        
         elif command.startswith("/mode "):
-            new_mode = command.split("/mode ", 1)[1].strip()
-            result = switch_mode(new_mode)
-            print(f"\n  {result}\n")
+            res = switch_jarvis_mode(command.split("/mode ", 1)[1])
+            print(f"\n  {res}\n")
             continue
-        
         elif command == "/learn":
-            print()
-            vectorstore = ingest_documents()
-            print()
+            vectorstore = rebuild_agent_memory("jarvis")
             continue
-        
         elif command == "/status":
-            print_status(vectorstore)
+            mem = "Attiva" if vectorstore else "Inattiva"
+            print(f"\n  Stato: {config.MODE.upper()} | DB: {mem} | Cartella: {config.DATA_PUBLIC_DIR.name}\n")
             continue
-        
         elif command == "/clear":
             os.system("cls" if sys.platform == "win32" else "clear")
             print_banner()
             continue
-        
         elif command.startswith("/"):
-            print(f"\n  ⚠️ Comando sconosciuto: {user_input}")
-            print(f"  Digita {Colors.YELLOW}/help{Colors.RESET} per la lista comandi.\n")
+            print(f"\n  ⚠️ Comando sconosciuto. Digita /help.\n")
             continue
         
-        # ─── Domanda normale → Chiedi a Jarvis ───────────────────────
-        # Step 1: Cerca contesto rilevante (se il RAG è attivo)
         context = ""
-        if vectorstore is not None:
-            context = get_relevant_context(user_input, vectorstore)
+        if vectorstore:
+            # Ricerca contesto
+            context = get_relevant_context(user_input, vectorstore, top_k=config.JARVIS_RAG_TOP_K)
         
-        # Step 2: Chiedi al modello AI
         print(f"\n{Colors.DIM}  ⏳ Jarvis sta pensando...{Colors.RESET}")
-        response = ask_jarvis(user_input, context=context if context else None)
         
-        # Step 3: Mostra la risposta
+        response = ask_ai("jarvis", user_input, context)
+        
         print(f"\n{Colors.CYAN}{Colors.BOLD}  Jarvis →{Colors.RESET}")
-        
-        # Indenta ogni riga della risposta
         for line in response.split("\n"):
             print(f"  {line}")
-        
-        # Indicatore se ha usato il RAG
+            
         if context:
-            print(f"\n  {Colors.DIM}📚 Risposta arricchita con i tuoi documenti{Colors.RESET}")
-        
+            print(f"\n  {Colors.DIM}📚 (Fonti consultate da data/public/){Colors.RESET}")
         print()
-
 
 if __name__ == "__main__":
     main()

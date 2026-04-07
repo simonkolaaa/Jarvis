@@ -1,0 +1,18 @@
+Benvenuto nel progetto Jarvis!
+
+Questo è un file di esempio nella cartella "data".
+Jarvis può leggere tutti i file .txt e .pdf che metti in questa cartella
+e usarli per rispondere alle tue domande in modo personalizzato.
+
+Come funziona:
+1. Metti i tuoi file (appunti, PDF, documenti) in questa cartella "data/"
+2. Avvia Jarvis e digita /learn per fargli leggere i nuovi file
+3. Fai le tue domande e Jarvis userà i tuoi documenti come contesto
+
+Esempio di informazione personale:
+- Il mio progetto si chiama "Jarvis" ed è un assistente AI personale.
+- Supporta due modalità: offline (Ollama + Mistral) e online (Google Gemini).
+- Usa la tecnica RAG per leggere i documenti dell'utente.
+- Il database vettoriale utilizzato è ChromaDB.
+
+Puoi cancellare questo file e sostituirlo con i tuoi documenti personali!

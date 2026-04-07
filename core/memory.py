@@ -1,10 +1,10 @@
 """
-Jarvis - Memory Module (La Memoria)
-Gestisce il sistema RAG: caricamento documenti, embeddings e ricerca in ChromaDB.
+Jarvis-2 - Memory Module Unificato
+Gestisce i sistemi RAG paralleli per gli Agenti, instanziando vettori separati 
+su cartelle differenti.
 """
-import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from langchain_community.document_loaders import TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -14,66 +14,43 @@ from langchain_chroma import Chroma
 import config
 
 
-def load_documents(data_dir: Path = None) -> list:
+def load_documents_from_paths(paths: List[Path]) -> list:
     """
-    Carica tutti i documenti (.txt, .pdf, .docx, .md) dalla cartella data/.
-    
-    Args:
-        data_dir: Path alla cartella dei documenti. Default: config.DATA_DIR
-    
-    Returns:
-        Lista di oggetti Document di LangChain.
+    Carica i file supportati da una lista di cartelle.
     """
-    data_dir = data_dir or config.DATA_DIR
     documents = []
     
-    if not data_dir.exists():
-        print(f"📁 Cartella {data_dir} non trovata. Creazione in corso...")
-        data_dir.mkdir(parents=True, exist_ok=True)
-        return documents
-    
-    # Trova tutti i file supportati
-    supported_files = []
-    for ext in ["*.txt", "*.pdf", "*.docx", "*.md"]:
-        supported_files.extend(data_dir.glob(ext))
-    
-    if not supported_files:
-        print("📭 Nessun documento trovato nella cartella data/")
-        return documents
-    
-    print(f"📖 Caricamento di {len(supported_files)} documento/i...")
-    
-    for file_path in supported_files:
-        try:
-            suffix = file_path.suffix.lower()
-            if suffix == ".txt" or suffix == ".md":
-                loader = TextLoader(str(file_path), encoding="utf-8")
-            elif suffix == ".pdf":
-                loader = PyPDFLoader(str(file_path))
-            elif suffix == ".docx":
-                loader = Docx2txtLoader(str(file_path))
-            else:
-                continue
+    for folder in paths:
+        if not folder.exists():
+            print(f"📁 Cartella {folder} inesistente. Salto...")
+            continue
             
-            docs = loader.load()
-            documents.extend(docs)
-            print(f"   ✅ {file_path.name} ({len(docs)} pagina/e)")
-        except Exception as e:
-            print(f"   ⚠️ Errore caricando {file_path.name}: {e}")
-    
+        supported_files = []
+        for ext in ["*.txt", "*.pdf", "*.docx", "*.md"]:
+            supported_files.extend(folder.glob(ext))
+            
+        for file_path in supported_files:
+            try:
+                suffix = file_path.suffix.lower()
+                if suffix in [".txt", ".md"]:
+                    loader = TextLoader(str(file_path), encoding="utf-8")
+                elif suffix == ".pdf":
+                    loader = PyPDFLoader(str(file_path))
+                elif suffix == ".docx":
+                    loader = Docx2txtLoader(str(file_path))
+                else:
+                    continue
+                
+                docs = loader.load()
+                documents.extend(docs)
+                print(f"   ✅ Caricato {file_path.name}")
+            except Exception as e:
+                print(f"   ⚠️ Errore {file_path.name}: {e}")
+                
     return documents
 
 
 def split_documents(documents: list) -> list:
-    """
-    Divide i documenti in chunk più piccoli per il RAG.
-    
-    Args:
-        documents: Lista di Document da dividere.
-    
-    Returns:
-        Lista di Document chunk.
-    """
     if not documents:
         return []
     
@@ -81,173 +58,96 @@ def split_documents(documents: list) -> list:
         chunk_size=config.CHUNK_SIZE,
         chunk_overlap=config.CHUNK_OVERLAP,
         length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""],
     )
-    
-    chunks = splitter.split_documents(documents)
-    print(f"✂️  Documenti divisi in {len(chunks)} chunk")
-    return chunks
+    return splitter.split_documents(documents)
 
 
 def get_embeddings():
-    """
-    Restituisce il modello di embedding (Ollama locale).
-    
-    Returns:
-        OllamaEmbeddings instance.
-    """
     return OllamaEmbeddings(model=config.EMBEDDING_MODEL)
 
 
-def create_or_load_vectorstore(chunks: list = None) -> Optional[Chroma]:
+def get_vectorstore(persist_dir: Path, chunks: list = None) -> Optional[Chroma]:
     """
-    Crea un nuovo vectorstore o carica quello esistente.
-    
-    Args:
-        chunks: Se forniti, crea un nuovo vectorstore con questi chunk.
-                Se None, prova a caricare un vectorstore esistente.
-    
-    Returns:
-        Istanza Chroma del vectorstore, o None se non esiste e non ci sono chunk.
+    Carica (o crea se forniti i chunks) un database Chroma specifico.
     """
     embeddings = get_embeddings()
-    persist_dir = str(config.CHROMA_DIR)
+    str_persist_dir = str(persist_dir)
     
     if chunks:
-        # Crea nuovo vectorstore (sovrascrive se esiste)
-        print(f"🧠 Creazione database vettoriale con {len(chunks)} chunk...")
+        # Crea/sovrascrive
+        print(f"🧠 Ricreazione indice vettoriale in {persist_dir.name}...")
         try:
             vectorstore = Chroma.from_documents(
                 documents=chunks,
                 embedding=embeddings,
-                persist_directory=persist_dir,
-                collection_name="jarvis_memory",
+                persist_directory=str_persist_dir,
+                collection_name="rag_memory",
             )
-            print("✅ Database vettoriale creato con successo!")
             return vectorstore
         except Exception as e:
-            print(f"❌ Errore creazione vectorstore: {e}")
-            print("   Assicurati che Ollama sia in esecuzione con il modello di embedding:")
-            print(f"   ollama pull {config.EMBEDDING_MODEL}")
+            print(f"❌ Errore ChromaDB: {e}")
             return None
-    
-    # Prova a caricare un vectorstore esistente
-    if config.CHROMA_DIR.exists() and any(config.CHROMA_DIR.iterdir()):
+            
+    # Prova a caricare l'esistente
+    if persist_dir.exists() and any(persist_dir.iterdir()):
         try:
-            vectorstore = Chroma(
-                persist_directory=persist_dir,
+            return Chroma(
+                persist_directory=str_persist_dir,
                 embedding_function=embeddings,
-                collection_name="jarvis_memory",
+                collection_name="rag_memory",
             )
-            # Verifica che non sia vuoto
-            count = vectorstore._collection.count()
-            if count > 0:
-                print(f"📚 Database vettoriale caricato ({count} chunk in memoria)")
-                return vectorstore
-        except Exception as e:
-            print(f"⚠️ Errore caricamento vectorstore esistente: {e}")
-    
+        except Exception:
+            pass
+            
     return None
 
 
-def get_relevant_context(query: str, vectorstore: Chroma, top_k: int = None) -> str:
-    """
-    Cerca nei documenti il contesto più rilevante per la query.
-    
-    Args:
-        query: La domanda dell'utente.
-        vectorstore: Istanza Chroma del vectorstore.
-        top_k: Numero di risultati da recuperare. Default: config.TOP_K_RESULTS
-    
-    Returns:
-        Stringa con il contesto rilevante formattato, o stringa vuota se nessun risultato.
-    """
+def get_relevant_context(query: str, vectorstore: Chroma, top_k: int = 4) -> str:
+    """Ricerca contestuale sui vettori passati."""
     if vectorstore is None:
         return ""
     
-    top_k = top_k or config.TOP_K_RESULTS
-    
     try:
-        retriever = vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": top_k},
-        )
-        
-        relevant_docs = retriever.invoke(query)
-        
-        if not relevant_docs:
+        retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
+        docs = retriever.invoke(query)
+        if not docs:
             return ""
-        
-        # Formatta il contesto
-        context_parts = []
-        for i, doc in enumerate(relevant_docs, 1):
-            source = doc.metadata.get("source", "sconosciuto")
-            source_name = Path(source).name if source != "sconosciuto" else source
-            context_parts.append(
-                f"[Documento {i} - {source_name}]\n{doc.page_content}"
-            )
-        
-        return "\n\n".join(context_parts)
-    
+            
+        parts = [f"[- {Path(d.metadata.get('source', '')).name}]\n{d.page_content}" for d in docs]
+        return "\n\n".join(parts)
     except Exception as e:
-        print(f"⚠️ Errore durante la ricerca nei documenti: {e}")
+        print(f"⚠️ Errore retriever: {e}")
         return ""
 
 
-def ingest_documents() -> Optional[Chroma]:
+def rebuild_agent_memory(agent_name: str) -> Optional[Chroma]:
     """
-    Pipeline completa di ingestione documenti:
-    Carica → Divide → Crea vectorstore.
-    
-    Returns:
-        Istanza Chroma del vectorstore, o None se fallisce.
+    Helper ad alto livello per ricostruire da zero l'indice di Jarvis, Linda o Arus.
+    Arus usa lo stesso DB di Jarvis (Pubblico).
     """
-    print("\n🔄 Ingestione documenti in corso...\n")
-    
-    # Step 1: Carica
-    documents = load_documents()
-    if not documents:
-        print("\n⚠️ Nessun documento da processare.")
-        print(f"   Aggiungi file .txt, .pdf, .docx o .md nella cartella: {config.DATA_DIR}")
-        return None
-    
-    # Step 2: Dividi
-    chunks = split_documents(documents)
-    if not chunks:
-        print("\n⚠️ Impossibile dividere i documenti in chunk.")
-        return None
-    
-    # Step 3: Crea vectorstore
-    vectorstore = create_or_load_vectorstore(chunks)
-    
-    if vectorstore:
-        print("\n🎉 Documenti caricati in memoria con successo!")
-    
-    return vectorstore
+    if agent_name.lower() == "linda":
+        db_path = config.CHROMA_LINDA_DIR
+        # Linda legge sia i dati pubblici, sia privati, sia eventuali extra
+        target_dirs = [config.DATA_PUBLIC_DIR, config.DATA_PRIVATE_DIR]
+        if config.SCUOLA_PATH:
+            target_dirs.append(Path(config.SCUOLA_PATH))
+        for extra in config.LINDA_EXTRA_PATHS:
+            target_dirs.append(Path(extra))
+    else:
+        # Jarvis legacy e Arus
+        db_path = config.CHROMA_JARVIS_DIR
+        target_dirs = [config.DATA_PUBLIC_DIR]
+        if config.SCUOLA_PATH:
+            target_dirs.append(Path(config.SCUOLA_PATH))
 
-
-def get_document_stats() -> dict:
-    """
-    Restituisce statistiche sui documenti nella cartella data/.
-    
-    Returns:
-        Dict con conteggi dei file per tipo.
-    """
-    data_dir = config.DATA_DIR
-    stats = {"txt": 0, "pdf": 0, "docx": 0, "md": 0, "total": 0}
-    
-    if not data_dir.exists():
-        return stats
-    
-    for f in data_dir.iterdir():
-        if f.suffix.lower() == ".txt":
-            stats["txt"] += 1
-        elif f.suffix.lower() == ".pdf":
-            stats["pdf"] += 1
-        elif f.suffix.lower() == ".docx":
-            stats["docx"] += 1
-        elif f.suffix.lower() == ".md":
-            stats["md"] += 1
-    
-    stats["total"] = stats["txt"] + stats["pdf"] + stats["docx"] + stats["md"]
-    return stats
+    print(f"\n🔄 (Ri)costruzione memoria per [{agent_name.upper()}] in corso...")
+    docs = load_documents_from_paths(target_dirs)
+    if not docs:
+        print("⚠️ Nessun documento trovato nelle cartelle assegnate.")
+        return None
+        
+    chunks = split_documents(docs)
+    vs = get_vectorstore(db_path, chunks)
+    if vs:
+        print("✨ Indice completato con successo!")
+    return vs

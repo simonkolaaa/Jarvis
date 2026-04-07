@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ bot_name }} - Interfaccia Avanzata</title>
+    <!-- Font moderni e icone -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/chat.css">
+</head>
+<body class="theme-{{ bot_id }}">
+    
+    <div class="background-glass"></div>
+    
+    <div class="chat-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-profile">
+                <div class="profile-avatar">
+                    {% if bot_id == "linda" %}
+                    <img src="/static/linda_avatar.jpg" alt="Linda AI">
+                    {% else %}
+                    <i class="fa-solid fa-cloud"></i>
+                    {% endif %}
+                </div>
+                <div class="header-info">
+                    <h1>{{ bot_name }}</h1>
+                    <span class="status-badge"><span class="pulse"></span> {{ mode }} • Pronto</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                {% if bot_id == "linda" %}
+                <button id="btnLearn" title="Indicizza nuovi documenti"><i class="fa-solid fa-server"></i> Sync RAG</button>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- Area messaggi -->
+        <main class="chat-messages" id="chatWindow">
+            <div class="message system">
+                <div class="avatar">
+                    {% if bot_id == "linda" %}
+                    <img src="/static/linda_avatar.jpg" alt="AI">
+                    {% else %}
+                    <i class="fa-solid fa-robot"></i>
+                    {% endif %}
+                </div>
+                <div class="bubble">Connessione sicura stabilita. Sono pronta, come posso assisterti oggi?</div>
+            </div>
+        </main>
+
+        <!-- Area Input -->
+        <footer class="chat-input-area">
+            <div class="input-wrapper">
+                <textarea id="userInput" placeholder="Invia un messaggio a {{ bot_name }}..." rows="1"></textarea>
+                <button id="sendBtn"><i class="fa-solid fa-arrow-up"></i></button>
+            </div>
+            <div class="footer-note">Le IA possono sbagliare. L'accesso a <code>Desktop/scuola</code> è abilitato.</div>
+        </footer>
+    </div>
+    <script>
+        const BOT_NAME = "{{ bot_name }}";
+        const BOT_ID = "{{ bot_id }}";
+    </script>
+    <script src="/static/chat.js"></script>
+</body>
+</html>
